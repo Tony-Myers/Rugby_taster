@@ -55,7 +55,7 @@ Ensure your responses are complete and not truncated. After each user response, 
         messages = [
             {"role": "system", "content": system_content},
             {"role": "system", "content": f"Interview topics: {interview_topics}"},
-            *conversation_history[-6:],  # last 6 exchanges for context
+            *conversation_history[-6:],  # only the last 6 to keep context
             {"role": "user", "content": prompt}
         ]
 
@@ -71,29 +71,42 @@ Ensure your responses are complete and not truncated. After each user response, 
     except Exception as e:
         return f"An error occurred in generate_response: {str(e)}"
 
+def convert_conversation_to_markdown(conversation):
+    """
+    Convert the conversation (a list of {'role': ..., 'content': ...}) into a Markdown string.
+    """
+    md_lines = []
+    for entry in conversation:
+        role = entry["role"].capitalize()
+        content = entry["content"]
+        md_lines.append(f"**{role}:** {content}\n")
+    return "\n".join(md_lines)
+
 def get_transcript_download_link(conversation):
-    df = pd.DataFrame(conversation)
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="interview_transcript.csv">Download Transcript</a>'
+    """
+    Create a download link for the transcript in Markdown format.
+    """
+    transcript_md = convert_conversation_to_markdown(conversation)
+    b64 = base64.b64encode(transcript_md.encode()).decode()
+    href = f'<a href="data:file/text;base64,{b64}" download="interview_transcript.md">Download Transcript</a>'
     return href
 
-def send_email(transcript_csv):
+def send_email(transcript_md):
     subject = "Interview Transcript"
     body = "Please find attached the interview transcript."
-    
+
     message = MIMEMultipart()
     message["From"] = SENDER_EMAIL
     message["To"] = RECEIVER_EMAIL
     message["Subject"] = subject
     message.attach(MIMEText(body, "plain"))
 
-    # Attach the CSV transcript
-    attachment_part = MIMEText(transcript_csv, "csv")
+    # Attach the Markdown transcript
+    attachment_part = MIMEText(transcript_md, "plain")
     attachment_part.add_header(
         "Content-Disposition",
         "attachment",
-        filename="interview_transcript.csv"
+        filename="interview_transcript.md"
     )
     message.attach(attachment_part)
 
@@ -159,7 +172,6 @@ def main():
 
         # Progress
         completed_questions = len([entry for entry in st.session_state.conversation if entry['role'] == "user"])
-        # Cap progress at 1.0
         progress_percentage = min(completed_questions / total_questions, 1.0)
         st.write(f"**Interview Progress: {completed_questions} out of {total_questions} questions answered**")
         st.progress(progress_percentage)
@@ -169,19 +181,19 @@ def main():
             if user_answer.strip():
                 combined_user_content = f"Answer: {user_answer}\nRating: {user_rating}"
                 st.session_state.conversation.append({"role": "user", "content": combined_user_content})
-                
+
                 ai_prompt = (
                     f"User's answer: {user_answer}\n"
                     f"User's rating: {user_rating}\n"
                     f"Provide feedback and ask a follow-up question."
                 )
                 ai_response = generate_response(ai_prompt, st.session_state.conversation)
-                
+
                 st.session_state.conversation.append({"role": "assistant", "content": ai_response})
                 st.session_state.current_question = ai_response
                 st.session_state.submitted = True
 
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.warning("Please provide an answer before submitting.")
 
@@ -190,25 +202,25 @@ def main():
             st.success("Interview completed! Thank you for sharing your rugby taster session experience.")
             st.session_state.current_question = "Interview ended"
 
-            # Convert conversation to CSV & send email
-            transcript_csv = pd.DataFrame(st.session_state.conversation).to_csv(index=False)
-            send_email(transcript_csv)
+            # Convert conversation to Markdown & send email
+            transcript_md = convert_conversation_to_markdown(st.session_state.conversation)
+            send_email(transcript_md)
             st.info("Your transcript has been emailed to the researcher.")
 
         # Option to display transcript
         if st.checkbox("Show Interview Transcript"):
             st.write("**Interview Transcript:**")
             for entry in st.session_state.conversation:
-                st.write(f"{entry['role'].capitalize()}: {entry['content']}")
+                st.write(f"**{entry['role'].capitalize()}:** {entry['content']}")
                 st.write("---")
-            
+
             st.markdown(get_transcript_download_link(st.session_state.conversation), unsafe_allow_html=True)
 
         # Restart Interview
         if st.button("Restart Interview"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            st.rerun()
+            st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
